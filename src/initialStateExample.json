@@ -2,5 +2,6 @@
   "balances": {},
   "price": 1,
   "pair": "",
-  "foreignCalls": []
+  "foreignCalls": [],
+  "invocations": []
 }
