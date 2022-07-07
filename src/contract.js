@@ -7,9 +7,45 @@ export function handle(state, action) {
   if (calledFunction === "buy") {
     // Mint tokens to curve //
     
-    // TODO: Validate amount of transfer
-    let amount = 100;
+    let transferTx, contractID, contractInput;
+    // grab the contract id of the token they are transferring in the supplied tx
+    try {
+      transferTx = await SmartWeave.unsafeClient.transactions.get(action.input.tx);
+    } catch (err) {
+      throw new ContractError(err);
+    }
 
+    transferTx.get("tags").forEach((tag) => {
+      if (tag.get("name", { decode: true, string: true }) === "Contract") {
+        contractID = tag.get("value", { decode: true, string: true });
+      }
+      if (tag.get("name", { decode: true, string: true }) === "Input") {
+        contractInput = JSON.parse(
+          tag.get("value", { decode: true, string: true })
+        );
+      }
+    });
+    
+    ContractAssert(
+      typeof contractID === "string",
+      "Invalid contract ID in transfer: not a string"
+    );
+    ContractAssert(
+      contractID !== "",
+      "No contract ID found in the transfer transaction"
+    );
+    ContractAssert(
+      !state.transfers.includes(transferTx),
+      "This transfer has already been used for an order"
+    );
+    ContractAssert(isAddress(contractID), "Invalid contract ID format");  
+    ContractAssert(contractID === state.pair, "Contract ID not paired");
+
+    // Test transferTx for valid contract interaction
+    await ensureValidTransfer(contractID, transferTx, caller);
+    state.transfers.push(transferTx);
+
+    let amount = contractInput.qty;
     while (amount !== 0) {
       let supply = getCurrentSupply(state);
       let priceToMint = calcPrice(supply);
@@ -66,7 +102,7 @@ export function handle(state, action) {
 
   } else if (calledFunction === "transfer") {
     // Transfer tokens to another wallet //
-    
+
     const target = input.target
     const qty = input.qty
 
@@ -109,3 +145,67 @@ function calcPrice(supply) {
   // y=x
   return supply;
 }
+
+
+// Utilities created by Marton Lederer
+
+const isAddress = (addr) => /[a-z0-9_-]{43}/i.test(addr);
+
+const ensureValidTransfer = async (tokenID, transferTx, caller) => {
+  // Test tokenTx for valid contract interaction
+  await ensureValidInteraction(tokenID, transferTx);
+
+  try {
+    const tx = await SmartWeave.unsafeClient.transactions.get(transferTx);
+
+    tx.get("tags").forEach((tag) => {
+      if (tag.get("name", { decode: true, string: true }) === "Input") {
+        const input = JSON.parse(tag.get("value", { decode: true, string: true }));
+
+        // check if the interaction is a transfer
+        ContractAssert(
+          input.function === "transfer",
+          "The interaction is not a transfer"
+        );
+
+        // make sure that the target of the transfer transaction is THIS (the clob) contract
+        ContractAssert(
+          input.target === SmartWeave.contract.id,
+          "The target of this transfer is not this contract"
+        );
+
+        // validate the transfer qty
+        ContractAssert(input.qty && input.qty > 0, "Invalid transfer quantity");
+      }
+    });
+
+    // validate the transfer owner
+    const transferOwner = tx.get("owner");
+    const transferOwnerAddress =
+      await SmartWeave.unsafeClient.wallets.ownerToAddress(transferOwner);
+
+    ContractAssert(
+      transferOwnerAddress === caller,
+      "Transfer owner is not the tx creator"
+    );
+  } catch (err) {
+    throw new ContractError(err);
+  }
+};
+
+
+const ensureValidInteraction = async (contractID, interactionID) => {
+  const { validity: contractTxValidities } = await SmartWeave.contracts.readContractState(contractID, undefined, true);
+    
+  // The interaction tx of the token somewhy does not exist
+  ContractAssert(
+    interactionID in contractTxValidities,
+    "The interaction is not associated with this contract"
+  );
+  
+  // Invalid transfer
+  ContractAssert(
+    contractTxValidities[interactionID],
+    "The interaction was invalid"
+  );
+};
