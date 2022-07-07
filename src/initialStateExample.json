@@ -3,5 +3,6 @@
   "price": 1,
   "pair": "",
   "foreignCalls": [],
+  "transfers": [],
   "invocations": []
 }
