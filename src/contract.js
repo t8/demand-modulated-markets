@@ -56,7 +56,7 @@ export function handle(state, action) {
       } else if (amount < priceToMint) {
         // Add to foreignCalls to return rest of amount
         state.foreignCalls.push({
-          tdID: SmartWeave.transaction.id,
+          txID: SmartWeave.transaction.id,
           contract: state.pair,
           input: {
             function: "transfer",
